@@ -1,0 +1,6 @@
+node_modules/
+.test-artifacts/
+gateway-package/
+/PROVIDER-AUDIT*.md
+/ENDPOINTS.md
+/RESEARCH-*.md

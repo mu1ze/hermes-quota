@@ -1,0 +1,1 @@
+{"name":"hermes-quota-desktop","private":true,"scripts":{"test":"node --test tests/quota-plugin.test.mjs","test:browser":"node tests/quota-browser-test.mjs","test:performance":"node tests/quota-performance-test.mjs"},"devDependencies":{"jsdom":"29.1.1","playwright":"1.65.1"}}

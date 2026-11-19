@@ -6,7 +6,7 @@ A Hermes Desktop plugin that shows provider quotas and balances in a sidebar pop
 
 Copy `plugin.js` into `$HERMES_HOME/desktop-plugins/quota/` (default: `~/.hermes/desktop-plugins/quota/`). Desktop loads disk plugins automatically; if needed, use **⌘K → Reload desktop plugins**. Disable it in Desktop’s plugin settings.
 
-This repository contains the Desktop frontend (`plugin.js`) and a gateway adapter for API-key credit balances (`gateway/quota/`). The built-in model and Nous billing RPCs do not require an additional adapter. Antigravity and spend still require compatible endpoints on the selected gateway; those adapters are not included. This plugin is not listed in the Hermes Marketplace.
+This repository contains the Desktop frontend (`plugin.js`) and a gateway adapter (`gateway/quota/`) for API-key credit balances, Anthropic OAuth session limits, and Antigravity subscription quota. The built-in model and Nous billing RPCs do not require an additional adapter. Spend reporting still requires a compatible gateway endpoint; that adapter is not included. This plugin is not listed in the Hermes Marketplace.
 
 Click **Quota** in the sidebar to open the lightweight anchored popover. Escape or clicking outside closes it. There is also a **Show quota and balances** command.
 
@@ -26,7 +26,7 @@ No provider timeouts were shortened to hide information, and no closed-popup pol
 
 ## Antigravity on a connected gateway
 
-Desktop calls `ctx.rest('/antigravity')`, i.e. the authenticated `/api/plugins/quota/antigravity` endpoint on the **selected gateway**, not an executable on the Desktop machine. A compatible gateway adapter can run the official `agy -p=/quota` command using the gateway’s existing login. The Desktop plugin does not read Google OAuth files or receive credentials. No LLM prompt is used.
+Desktop calls `ctx.rest('/antigravity')`, i.e. the authenticated `/api/plugins/quota/antigravity` endpoint on the **selected gateway**, not an executable on the Desktop machine. The included gateway adapter runs the official `agy -p /usage` command (print mode, 20s turn limit) in a dedicated empty workspace under `$HERMES_HOME/cache/agy-quota/`, using the gateway's existing agy login. The Desktop plugin does not read Google OAuth files or receive credentials, and the adapter never handles tokens. No LLM prompt is used — `/usage` is a built-in agy slash command. If `agy` is not installed the endpoint reports `unavailable` and the Desktop hides the section.
 
 The normalized records are `{pool, window, remainingPercent, resetAt}` plus response status and fetch timestamp. Percentages already mean **remaining**. The UI groups by the exact returned pool name, preserves every reported window separately, and labels a pool Exhausted when any unexpired reported window has exactly 0% remaining. It neither estimates token counts nor invents missing limits. Expired snapshots display Update needed instead of assuming a refill. Reset dates are formatted in the Desktop's local timezone. The Antigravity REST result is cached for 60 seconds; Refresh does not bypass that cache.
 
@@ -53,7 +53,7 @@ Supported balance APIs:
 | Venice AI | `GET /api/v1/billing/balance` | DIEM and USD balances (requires a Venice **admin** key; inference keys get a billing-permission label) |
 | OpenAI API | `GET /v1/dashboard/billing/credit_grants` | Prepaid credit balance (USD); postpaid organizations report unsupported |
 
-Other API-key providers (Gemini/Google AI Studio, Anthropic, xAI, ...) have no public balance API for plain API keys and are labeled **No balance API available for this provider** — never a fabricated zero. Keys, raw provider bodies and raw errors never leave the adapter; only finite numbers, display labels and safe message codes. Results are cached ~55s per profile home with the original acquisition time retained. `/antigravity` reports `unavailable` unless a separate Antigravity adapter is installed.
+Other API-key providers (Gemini/Google AI Studio, Anthropic, xAI, ...) have no public balance API for plain API keys and are labeled **No balance API available for this provider** — never a fabricated zero. Keys, raw provider bodies and raw errors never leave the adapter; only finite numbers, display labels and safe message codes. Results are cached ~55s per profile home with the original acquisition time retained. `/antigravity` serves the official agy CLI's subscription quota (see above).
 
 ### Anthropic OAuth session limits
 

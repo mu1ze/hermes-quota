@@ -376,12 +376,97 @@ async def credits() -> dict[str, Any]:
         return payload
 
 
+def _agy_binary() -> Optional[str]:
+    import shutil
+
+    found = shutil.which("agy")
+    if found:
+        return found
+    from pathlib import Path
+
+    candidate = Path.home() / ".local" / "bin" / "agy"
+    return str(candidate) if candidate.is_file() else None
+
+
+def _parse_agy_usage(text: str) -> list[dict[str, Any]]:
+    """`agy -p /usage` prints TSV rows: pool, window label, remaining%, reset ISO.
+    Only fully valid rows become windows; anything else is dropped, never guessed."""
+    import re
+
+    windows: list[dict[str, Any]] = []
+    for line in (text or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) != 4:
+            continue
+        pool, window, percent, reset_at = (p.strip() for p in parts)
+        match = re.fullmatch(r"(\d+(?:\.\d+)?)%", percent)
+        if not pool or not window or not match:
+            continue
+        remaining = float(match.group(1))
+        if not 0.0 <= remaining <= 100.0:
+            continue
+        try:
+            datetime.fromisoformat(reset_at.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        windows.append({"pool": pool, "window": window, "remainingPercent": remaining, "resetAt": reset_at})
+    return windows
+
+
+def _agy_result_from(returncode: Optional[int], stdout: str) -> dict[str, Any]:
+    if returncode != 0:
+        return {"status": "error", "windows": [], "fetchedAt": datetime.now(timezone.utc).isoformat()}
+    windows = _parse_agy_usage(stdout)
+    if not windows:
+        return {"status": "error", "windows": [], "fetchedAt": datetime.now(timezone.utc).isoformat()}
+    return {"status": "ok", "windows": windows, "fetchedAt": datetime.now(timezone.utc).isoformat()}
+
+
+def _agy_usage_sync() -> dict[str, Any]:
+    import subprocess
+    from pathlib import Path
+
+    binary = _agy_binary()
+    if binary is None:
+        return {"status": "unavailable", "windows": []}
+    # A dedicated empty workspace: agy must not pick up a project's agent rules
+    # files, and the quota read must not write into any real project.
+    try:
+        from hermes_constants import get_hermes_home
+
+        workdir = Path(get_hermes_home()) / "cache" / "agy-quota"
+    except Exception:
+        workdir = Path.home() / ".hermes" / "cache" / "agy-quota"
+    workdir.mkdir(parents=True, exist_ok=True)
+    try:
+        completed = subprocess.run(
+            [binary, "-p", "/usage", "--print-timeout", "20s"],
+            cwd=str(workdir), capture_output=True, text=True, timeout=22,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return {"status": "error", "windows": [], "fetchedAt": datetime.now(timezone.utc).isoformat()}
+    return _agy_result_from(completed.returncode, completed.stdout)
+
+
 @router.get("/antigravity")
 async def antigravity() -> dict[str, Any]:
-    # Antigravity quota is served by a separate gateway adapter (official agy
-    # CLI). This adapter does not read Google OAuth files; report unavailable
-    # so the Desktop hides the section instead of showing an error.
-    return {"status": "unavailable", "windows": []}
+    """Antigravity subscription quota via the official agy CLI's existing login.
+    No Google OAuth files are read and no credentials are handled here."""
+    try:
+        from hermes_constants import get_hermes_home
+
+        home = str(get_hermes_home())
+    except Exception:
+        home = "default"
+    key = f"{home}:antigravity"
+    async with _cache_lock:
+        cached = _cache.get(key)
+        if cached and time.monotonic() - cached[0] < _CACHE_TTL_SECONDS:
+            return cached[1]
+        payload = await asyncio.to_thread(_agy_usage_sync)
+        if payload.get("status") == "ok":
+            _cache[key] = (time.monotonic(), payload)
+        return payload
 
 
 @router.get("/health")

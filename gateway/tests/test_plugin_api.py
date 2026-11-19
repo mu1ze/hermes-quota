@@ -223,6 +223,61 @@ class AnthropicUsageTests(unittest.TestCase):
         self.assertNotIn("windows", inv["usage"])
 
 
+class AntigravityTests(unittest.TestCase):
+    LIVE_FIXTURE = (
+        "Gemini Models\tWeekly Limit Remaining\t97%\t2026-11-26T18:26:10Z\n"
+        "Gemini Models\tFive Hour Limit Remaining\t91%\t2026-11-19T23:26:10Z\n"
+        "Claude and GPT models\tWeekly Limit Remaining\t99%\t2026-11-26T18:58:59Z\n"
+        "Claude and GPT models\tFive Hour Limit Remaining\t98%\t2026-11-19T23:58:59Z\n"
+        "Gemini 4 Argon\tGemini 4 Argon Weekly Limit\t100%\t2026-11-26T19:16:43Z\n"
+    )
+
+    def test_parses_live_fixture(self):
+        windows = api._parse_agy_usage(self.LIVE_FIXTURE)
+        self.assertEqual(len(windows), 5)
+        self.assertEqual(windows[0], {"pool": "Gemini Models", "window": "Weekly Limit Remaining",
+                                      "remainingPercent": 97.0, "resetAt": "2026-11-26T18:26:10Z"})
+        self.assertEqual(windows[4]["pool"], "Gemini 4 Argon")
+        self.assertEqual(windows[4]["remainingPercent"], 100.0)
+
+    def test_invalid_rows_dropped_not_guessed(self):
+        text = (
+            "Welcome to agy!\n"                                   # noise
+            "Gemini Models\tWeekly\t97%\n"                        # missing reset column
+            "Gemini Models\tWeekly\t101%\t2026-11-26T18:26:10Z\n"  # out of range
+            "Gemini Models\tWeekly\t-5%\t2026-11-26T18:26:10Z\n"   # negative
+            "Gemini Models\tWeekly\tlots%\t2026-11-26T18:26:10Z\n" # not a number
+            "Gemini Models\tWeekly\t97%\tnot-a-date\n"            # bad reset
+            "\tWeekly\t97%\t2026-11-26T18:26:10Z\n"               # empty pool
+            "Gemini Models\t\t97%\t2026-11-26T18:26:10Z\n"        # empty window
+            "Gemini Models\tWeekly\t0%\t2026-11-26T18:26:10Z\n"   # exhausted: valid
+        )
+        windows = api._parse_agy_usage(text)
+        self.assertEqual(len(windows), 1)
+        self.assertEqual(windows[0]["remainingPercent"], 0.0)
+
+    def test_fractional_percent(self):
+        windows = api._parse_agy_usage("Pool\tWindow\t97.5%\t2026-11-26T18:26:10Z")
+        self.assertEqual(windows[0]["remainingPercent"], 97.5)
+
+    def test_result_shapes(self):
+        ok = api._agy_result_from(0, self.LIVE_FIXTURE)
+        self.assertEqual(ok["status"], "ok")
+        self.assertEqual(len(ok["windows"]), 5)
+        self.assertIn("fetchedAt", ok)
+        self.assertEqual(api._agy_result_from(1, self.LIVE_FIXTURE)["status"], "error")
+        self.assertEqual(api._agy_result_from(0, "sign in required")["status"], "error")
+        self.assertEqual(api._agy_result_from(0, "")["windows"], [])
+
+    def test_missing_binary_is_unavailable(self):
+        original = api._agy_binary
+        api._agy_binary = lambda: None
+        try:
+            self.assertEqual(api._agy_usage_sync(), {"status": "unavailable", "windows": []})
+        finally:
+            api._agy_binary = original
+
+
 class PayloadTests(unittest.TestCase):
     def test_payload_shape_and_cache(self):
         calls = {"n": 0}

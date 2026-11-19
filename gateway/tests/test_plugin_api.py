@@ -157,6 +157,72 @@ class UnsupportedTests(unittest.TestCase):
         self.assertEqual(record["status"], "unsupported")
 
 
+class AnthropicUsageTests(unittest.TestCase):
+    @staticmethod
+    def entry(auth_type="oauth", token="sk-ant-oat01-old", label="claude-1", entry_id="e1"):
+        from types import SimpleNamespace
+        return SimpleNamespace(id=entry_id, auth_type=auth_type, access_token=token, label=label)
+
+    @staticmethod
+    def snapshot():
+        from datetime import datetime, timezone
+        from types import SimpleNamespace
+        return SimpleNamespace(windows=[
+            SimpleNamespace(label="Current session", used_percent=42.0,
+                            reset_at=datetime(2026, 1, 1, 5, 0, tzinfo=timezone.utc), scope="account"),
+            SimpleNamespace(label="Current week", used_percent=10.0, reset_at=None, scope="account"),
+            SimpleNamespace(label="Unknown", used_percent=None, reset_at=None, scope="account"),
+        ])
+
+    def test_expired_token_refreshed_before_fetch(self):
+        seen = {}
+        refreshed = self.entry(token="sk-ant-oat01-new")
+        def refresh(entry):
+            seen["refreshed"] = entry.id
+            return refreshed
+        def fetch(token):
+            seen["fetched_with"] = token
+            return self.snapshot()
+        inv = api._anthropic_usage_from([self.entry()], refresh, fetch, lambda e: True)
+        self.assertEqual(seen, {"refreshed": "e1", "fetched_with": "sk-ant-oat01-new"})
+        self.assertEqual(inv["slug"], "anthropic")
+        self.assertTrue(inv["authenticated"])
+        windows = inv["usage"]["windows"]
+        self.assertEqual(len(windows), 2, "windows without a percent are dropped")
+        self.assertEqual(windows[0], {"label": "Current session", "used_percent": 42.0,
+                                      "resets_at": "2026-01-01T05:00:00+00:00", "scope": "account"})
+        self.assertIsNone(windows[1]["resets_at"])
+
+    def test_fresh_token_not_refreshed(self):
+        def refresh(entry):
+            raise AssertionError("fresh token must not consume a rotation")
+        inv = api._anthropic_usage_from([self.entry()], refresh, lambda t: self.snapshot(), lambda e: False)
+        self.assertIn("windows", inv["usage"])
+
+    def test_failed_refresh_reports_nothing(self):
+        inv = api._anthropic_usage_from([self.entry()], lambda e: None, lambda t: self.snapshot(), lambda e: True)
+        self.assertIsNone(inv)
+
+    def test_api_key_entries_skipped(self):
+        inv = api._anthropic_usage_from([self.entry(auth_type="api_key", token="sk-ant-api03-x")],
+                                        lambda e: e, lambda t: self.snapshot(), lambda e: False)
+        self.assertIsNone(inv)
+
+    def test_fetch_failure_reports_nothing(self):
+        def fetch(token):
+            raise RuntimeError("401")
+        self.assertIsNone(api._anthropic_usage_from([self.entry()], lambda e: e, fetch, lambda e: False))
+        self.assertIsNone(api._anthropic_usage_from([self.entry()], lambda e: e, lambda t: None, lambda e: False))
+
+    def test_multiple_accounts_use_accounts_shape(self):
+        entries = [self.entry(entry_id="e1", label="claude-1"), self.entry(entry_id="e2", label="claude-2")]
+        inv = api._anthropic_usage_from(entries, lambda e: e, lambda t: self.snapshot(), lambda e: False)
+        accounts = inv["usage"]["accounts"]
+        self.assertEqual([a["label"] for a in accounts], ["claude-1", "claude-2"])
+        self.assertTrue(all(a["state"] == "ok" and a["windows"] for a in accounts))
+        self.assertNotIn("windows", inv["usage"])
+
+
 class PayloadTests(unittest.TestCase):
     def test_payload_shape_and_cache(self):
         calls = {"n": 0}

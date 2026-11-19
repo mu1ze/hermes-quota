@@ -55,6 +55,12 @@ Supported balance APIs:
 
 Other API-key providers (Gemini/Google AI Studio, Anthropic, xAI, ...) have no public balance API for plain API keys and are labeled **No balance API available for this provider** — never a fabricated zero. Keys, raw provider bodies and raw errors never leave the adapter; only finite numbers, display labels and safe message codes. Results are cached ~55s per profile home with the original acquisition time retained. `/antigravity` reports `unavailable` unless a separate Antigravity adapter is installed.
 
+### Anthropic OAuth session limits
+
+The adapter also reports Claude session/weekly limits for Anthropic accounts connected via OAuth (`usage.windows`, or `usage.accounts` for several logins), merged into the same `/credits` response inventory. The core's read-only quota path never refreshes an expired OAuth token, which silently hides these gauges; the adapter refreshes through the credential pool's own locked, persisted rotation (`try_refresh_matching`) — single-use refresh grants are never spent uncommitted — then reads `api.anthropic.com/api/oauth/usage` via the core fetcher. API-key Anthropic credentials are skipped (the endpoint is OAuth-only).
+
+**Reload caveat:** with the default `plugins.isolation: in_process`, an already-mounted plugin keeps its imported module until the gateway restarts. After updating `plugin_api.py`, run `hermes gateway restart` from a shell outside the gateway (or wait for the next restart) before the new code serves requests.
+
 Install on the gateway machine:
 
 ```sh

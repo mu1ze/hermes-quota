@@ -269,12 +269,94 @@ async def _build_payload() -> dict[str, Any]:
         {"slug": slug, "name": _provider_name(slug), "authenticated": True}
         for slug in sorted({r["slug"] for r in records})
     ]
+    # OAuth session limits (Anthropic/Claude): the core's read-only quota path
+    # never refreshes an expired OAuth token, so a stale access token silently
+    # hides the session gauges. Refresh through the credential pool's own
+    # locked, persisted rotation and report the windows as inventory usage.
+    anthropic = await asyncio.to_thread(_anthropic_usage_inventory)
+    if anthropic is not None:
+        inventory.append(anthropic)
     return {
         "providers": list(records),
         "inventory": inventory,
         "spend": [],
         "fetchedAt": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def _usage_wire_windows(snapshot: Any) -> list[dict[str, Any]]:
+    windows: list[dict[str, Any]] = []
+    for w in getattr(snapshot, "windows", ()) or ():
+        if w.used_percent is None:
+            continue
+        windows.append({
+            "label": w.label,
+            "used_percent": float(w.used_percent),
+            "resets_at": w.reset_at.isoformat() if w.reset_at else None,
+            "scope": w.scope,
+        })
+    return windows
+
+
+def _anthropic_usage_from(entries: list[Any], refresh: Any, fetch: Any, is_expiring: Any) -> Optional[dict[str, Any]]:
+    """Pure core of the Anthropic usage read: ``refresh(entry)`` must be the
+    pool's own persisted rotation (single-use refresh tokens), ``fetch(token)``
+    the usage snapshot. Injectable for fixture tests."""
+    accounts: list[dict[str, Any]] = []
+    for entry in entries:
+        if getattr(entry, "auth_type", None) != "oauth":
+            continue
+        token = (getattr(entry, "access_token", None) or "").strip()
+        if not token:
+            continue
+        try:
+            if is_expiring(entry):
+                refreshed = refresh(entry)
+                if refreshed is None:
+                    continue
+                entry = refreshed
+                token = (getattr(entry, "access_token", None) or "").strip()
+                if not token:
+                    continue
+            snapshot = fetch(token)
+        except Exception:
+            log.warning("quota: Anthropic usage read failed", exc_info=True)
+            continue
+        windows = _usage_wire_windows(snapshot) if snapshot is not None else []
+        if windows:
+            accounts.append({"label": getattr(entry, "label", None) or "Claude account", "state": "ok", "windows": windows})
+    if not accounts:
+        return None
+    inventory: dict[str, Any] = {"slug": "anthropic", "name": _provider_name("anthropic"), "authenticated": True}
+    if len(accounts) == 1:
+        inventory["usage"] = {"windows": accounts[0]["windows"]}
+    else:
+        inventory["usage"] = {"accounts": accounts}
+    return inventory
+
+
+def _anthropic_usage_inventory() -> Optional[dict[str, Any]]:
+    try:
+        from agent.credential_pool import load_pool
+        from agent.credential_pool_plugin import plugin_row_is_expiring
+        from agent.account_usage import fetch_account_usage
+    except Exception:
+        return None
+    try:
+        pool = load_pool("anthropic")
+        entries, _pending = pool._available_entries(clear_expired=False, refresh=False)
+    except Exception:
+        log.debug("quota: anthropic pool unreadable", exc_info=True)
+        return None
+
+    def refresh(entry: Any) -> Any:
+        # Public, locked, force-refresh of exactly this entry; commits the
+        # rotated token pair so no single-use grant is spent uncommitted.
+        return pool.try_refresh_matching(credential_id=entry.id)
+
+    def fetch(token: str) -> Any:
+        return fetch_account_usage("anthropic", **{"api_key": token})
+    return _anthropic_usage_from(entries, refresh, fetch, plugin_row_is_expiring)
 
 
 @router.get("/credits")

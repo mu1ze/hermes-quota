@@ -6,7 +6,7 @@ A Hermes Desktop plugin that shows provider quotas and balances in a sidebar pop
 
 Copy `plugin.js` into `$HERMES_HOME/desktop-plugins/quota/` (default: `~/.hermes/desktop-plugins/quota/`). Desktop loads disk plugins automatically; if needed, use **⌘K → Reload desktop plugins**. Disable it in Desktop’s plugin settings.
 
-This repository is the Desktop frontend only. The built-in model and Nous billing RPCs do not require an additional adapter. Antigravity, API-key balances, and spend require compatible endpoints on the selected gateway; those gateway adapters are not included. This plugin is not listed in the Hermes Marketplace.
+This repository contains the Desktop frontend (`plugin.js`) and a gateway adapter for API-key credit balances (`gateway/quota/`). The built-in model and Nous billing RPCs do not require an additional adapter. Antigravity and spend still require compatible endpoints on the selected gateway; those adapters are not included. This plugin is not listed in the Hermes Marketplace.
 
 Click **Quota** in the sidebar to open the lightweight anchored popover. Escape or clicking outside closes it. There is also a **Show quota and balances** command.
 
@@ -39,6 +39,34 @@ The same popup fetches `ctx.rest('/credits')` on the selected gateway and displa
 The UI merges balance rows into matching provider sections and still works if the subscription inventory or Antigravity source fails. Billing permission requirements, unsupported provider APIs, and temporary errors receive distinct safe labels. Provider response bodies, keys and raw errors never belong in this UI. Credit results are gateway/profile-scoped and cached for 60 seconds, with their original acquisition time retained on cache hits.
 
 Fixture tests verify rendering, not which providers are available on your gateway.
+
+## Gateway adapter: API-key credit balances
+
+`gateway/quota/` is the backend that serves `ctx.rest('/credits')` (mounted at `/api/plugins/quota/credits` on the selected gateway). It reports balances for every provider configured with an **API key** in the active profile — credential-pool entries with `auth_type: api_key` plus registry env-var keys. OAuth/subscription providers are out of scope here; the Desktop reads those through `model.options` and native `billing.state`.
+
+Supported balance APIs:
+
+| Provider | Source | Reported |
+|---|---|---|
+| OpenRouter | `GET /api/v1/credits` + `GET /api/v1/key` | Account balance (credits − usage, USD) and per-key spending budget when the key has a limit |
+| DeepSeek | `GET /user/balance` | Account balance per reported currency (CNY/USD) |
+| Venice AI | `GET /api/v1/billing/balance` | DIEM and USD balances (requires a Venice **admin** key; inference keys get a billing-permission label) |
+| OpenAI API | `GET /v1/dashboard/billing/credit_grants` | Prepaid credit balance (USD); postpaid organizations report unsupported |
+
+Other API-key providers (Gemini/Google AI Studio, Anthropic, xAI, ...) have no public balance API for plain API keys and are labeled **No balance API available for this provider** — never a fabricated zero. Keys, raw provider bodies and raw errors never leave the adapter; only finite numbers, display labels and safe message codes. Results are cached ~55s per profile home with the original acquisition time retained. `/antigravity` reports `unavailable` unless a separate Antigravity adapter is installed.
+
+Install on the gateway machine:
+
+```sh
+cp -R gateway/quota ~/.hermes/plugins/quota
+hermes plugins enable quota
+```
+
+The gateway hot-mounts the routes on the first request — no restart needed. Backend fixture tests (no live credentials or network):
+
+```sh
+<hermes-runtime-python> -m unittest discover -s gateway/tests -v
+```
 
 ## Nous: same source as Settings → Billing
 

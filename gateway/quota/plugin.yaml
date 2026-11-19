@@ -1,0 +1,14 @@
+name: quota
+manifest_version: 2
+version: 1.0.0
+kind: backend
+description: "Gateway adapter for the Quota Desktop plugin: reports API-key credit balances (OpenRouter, DeepSeek, Venice, OpenAI) at /api/plugins/quota/credits. Read-only; never exposes key material."
+author: mu1ze
+license: MIT
+homepage: https://github.com/mu1ze/hermes-quota
+platforms:
+  - linux
+  - macos
+  - windows
+requires_hermes: ">=0.21.0"
+capabilities: []

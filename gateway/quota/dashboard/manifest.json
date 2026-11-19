@@ -1,0 +1,1 @@
+{"name": "quota", "label": "Quota", "description": "Gateway adapter for the Quota Desktop plugin: API-key credit balances (OpenRouter, DeepSeek, Venice, OpenAI) at /api/plugins/quota/credits", "icon": "Gauge", "version": "1.0.0", "api": "plugin_api.py"}

@@ -40,6 +40,13 @@ test('Antigravity still displays when the provider inventory fails',async()=>{
  const h=await setup(new Error('inventory offline'),{status:'ok',windows:[{pool:'Pool',window:'Weekly',remainingPercent:0.4,resetAt:'2099-01-07T00:00:00Z'}]});
  try{document.querySelector('[data-quota-trigger]').click();await h.tick();const p=document.querySelector('[data-quota-popover]');assert.match(p.textContent,/0.4% left/);assert.doesNotMatch(p.textContent,/Exhausted/);assert.match(p.textContent,/Other provider quota unavailable/);}finally{h.cleanup();}
 });
+test('Antigravity epoch-zero and null resets render remaining percentage instead of Update needed, while real past resets stay expired',async()=>{
+ const h=await setup({providers:[]},{status:'ok',fetchedAt:'2099-01-01T00:00:00Z',windows:[
+  {pool:'Claude and GPT models',window:'Weekly Limit Remaining',remainingPercent:100,resetAt:'1970-01-01T00:00:00Z'},
+  {pool:'Claude and GPT models',window:'Five Hour Limit Remaining',remainingPercent:100,resetAt:null},
+  {pool:'Expired Pool',window:'Weekly Limit Remaining',remainingPercent:50,resetAt:'2000-01-01T00:00:00Z'}]});
+ try{document.querySelector('[data-quota-trigger]').click();await h.tick();const p=document.querySelector('[data-quota-popover]');assert.match(p.textContent,/100% left/);assert.match(p.textContent,/Update needed/);assert.equal(p.querySelectorAll('[role="meter"]').length,2);assert.equal(p.querySelectorAll('[data-quota-reset]').length,0);}finally{h.cleanup();}
+});
 test('API-key balances distinguish account credit, key budgets, currencies and zero without percentage bars',async()=>{
  const h=await setup({providers:[{slug:'openrouter',name:'OpenRouter',authenticated:true,auth_type:'api_key'}]},null,{fetchedAt:'2099-01-01T00:00:00Z',providers:[
   {slug:'openrouter',name:'OpenRouter',status:'ok',balances:[{label:'Account balance',remaining:12.34,currency:'USD',scope:'account'},{label:'API key budget',remaining:0,currency:'USD',scope:'key',accountLabel:'Work'}]},

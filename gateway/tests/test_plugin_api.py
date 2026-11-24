@@ -260,6 +260,17 @@ class AntigravityTests(unittest.TestCase):
         windows = api._parse_agy_usage("Pool\tWindow\t97.5%\t2026-11-26T18:26:10Z")
         self.assertEqual(windows[0]["remainingPercent"], 97.5)
 
+    def test_epoch_zero_reset_normalized_to_none(self):
+        text = (
+            "Claude and GPT models\tWeekly Limit Remaining\t100%\t1970-01-01T00:00:00Z\n"
+            "Claude and GPT models\tFive Hour Limit Remaining\t100%\t1970-01-01T00:00:00Z\n"
+        )
+        windows = api._parse_agy_usage(text)
+        self.assertEqual(len(windows), 2)
+        self.assertEqual(windows[0]["remainingPercent"], 100.0)
+        self.assertIsNone(windows[0]["resetAt"])
+        self.assertIsNone(windows[1]["resetAt"])
+
     def test_result_shapes(self):
         ok = api._agy_result_from(0, self.LIVE_FIXTURE)
         self.assertEqual(ok["status"], "ok")

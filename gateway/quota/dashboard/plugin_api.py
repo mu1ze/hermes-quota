@@ -406,10 +406,14 @@ def _parse_agy_usage(text: str) -> list[dict[str, Any]]:
         if not 0.0 <= remaining <= 100.0:
             continue
         try:
-            datetime.fromisoformat(reset_at.replace("Z", "+00:00"))
+            reset_dt = datetime.fromisoformat(reset_at.replace("Z", "+00:00"))
         except ValueError:
             continue
-        windows.append({"pool": pool, "window": window, "remainingPercent": remaining, "resetAt": reset_at})
+        if reset_dt.tzinfo is None:
+            reset_dt = reset_dt.replace(tzinfo=timezone.utc)
+        # agy emits the Unix epoch (1970-01-01T00:00:00Z) when a pool's rolling window has not started yet.
+        normalized_reset: Optional[str] = None if reset_dt.timestamp() == 0 else reset_at
+        windows.append({"pool": pool, "window": window, "remainingPercent": remaining, "resetAt": normalized_reset})
     return windows
 
 

@@ -152,15 +152,18 @@ export default {
       }
       const pools=new Map();
       for (const w of result.windows) {
-        if (typeof w.pool !== 'string' || !w.pool.trim() || typeof w.window !== 'string' || typeof w.remainingPercent !== 'number' || !Number.isFinite(w.remainingPercent) || w.remainingPercent<0 || w.remainingPercent>100 || typeof w.resetAt !== 'string' || !Number.isFinite(Date.parse(w.resetAt))) continue;
+        const parsedReset=w.resetAt==null ? null : typeof w.resetAt==='string' ? Date.parse(w.resetAt) : NaN;
+        if (typeof w.pool !== 'string' || !w.pool.trim() || typeof w.window !== 'string' || typeof w.remainingPercent !== 'number' || !Number.isFinite(w.remainingPercent) || w.remainingPercent<0 || w.remainingPercent>100 || (parsedReset!==null && !Number.isFinite(parsedReset))) continue;
+        // agy emits the Unix epoch (1970-01-01T00:00:00Z) when a pool's rolling window has not started yet.
+        const resetAt=parsedReset===null || parsedReset===0 ? null : w.resetAt;
         if (!pools.has(w.pool)) pools.set(w.pool,[]);
-        pools.get(w.pool).push(w);
+        pools.get(w.pool).push({...w,resetAt});
       }
       if (!pools.size) note(block,'No valid quota windows returned by the gateway',true);
       for (const [name,windows] of pools) {
         const group=el('div','quota-account');group.dataset.quotaPool=name;
         const heading=el('div','quota-line');heading.append(el('span','quota-provider-name',name));
-        if (windows.some(w=>w.remainingPercent===0 && Date.parse(w.resetAt)>Date.now())) heading.append(statusIcon('stop','Exhausted','exhausted'));
+        if (windows.some(w=>w.remainingPercent===0 && (w.resetAt===null || Date.parse(w.resetAt)>Date.now()))) heading.append(statusIcon('stop','Exhausted','exhausted'));
         group.append(heading);
         addWindows(group,windows.map(w=>({label:w.window,remainingPercent:w.remainingPercent,resets_at:w.resetAt})));
         block.append(group);
